@@ -16,7 +16,6 @@ interface IParentsPair {
 
 
 export function create_target_func(data: number[]) {
-  //const data: number[] = frame.map(x => x.nose);
   const target_func = (coefs: ICoefs) => {
     let target_value: number = 0;
     target_value = data.reduce((res: number, currentValue: number, currentIndex: number) : number => {
@@ -37,25 +36,23 @@ function getRandomIntNumber(min: number, max: number) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
-function float64ToBytesBuffer(n: number) {
-  let tmp = new Float64Array(1);
-  tmp[0] = n;
-  return Buffer.from(tmp.buffer);
+function createChilds(first: number, second: number) {
+  const a: number = getRandomNumber(0, 1);
+  const createChild = (first: number, second: number, a: number) => a * first + (1 - a) * second;
+  const new_first: number = createChild(first, second, a);
+  const new_second: number = createChild(second, first, a);
+  return [new_first, new_second];
 }
 
-function swapCoefs(first: number, second: number) {
-  const first_buf = float64ToBytesBuffer(first);
-  const second_buf = float64ToBytesBuffer(second);
-  let start_index = getRandomIntNumber(0, 7);
-  let first_subbuf = first_buf.slice(start_index);
-  let second_subbuf = second_buf.slice(start_index);
-  const new_first_buf = Buffer.concat([first_buf.slice(0, start_index), second_subbuf]);
-  const new_second_buf = Buffer.concat([second_buf.slice(0, start_index), first_subbuf]);
-  //console.log(first, new_first_buf.readDoubleLE(0));
-  //console.log(second, new_second_buf.readDoubleLE(0));
-  first = new_first_buf.readDoubleLE(0);
-  second = new_second_buf.readDoubleLE(0);
-  return [first, second];
+function mutateUnevely(
+  element: number, max: number, min: number, current_era: number, 
+  number_epochs: number, r: number, xe: number, b: number) {
+    
+  const sigma = (t: number, y: number) => {
+    return y * (1 - Math.pow(r, Math.pow(1 - t / number_epochs, b)));
+  }
+  let res = element + Math.pow(-1, xe) * sigma(current_era, xe === 0 ? max - element : element - min);
+  return res;
 }
 
 export class GeneticEvolution {
@@ -66,9 +63,10 @@ export class GeneticEvolution {
 
   constructor(
     private target_func: any,
+    private min: number = -100,
+    private max: number = 100,
     private mutation_probability: number = 0.05,
-    private killing_probability: number = 0.2,
-    private max_pairs: number = 1000
+    private irregularity_coef: number = 10,
   ) {
     this.population = [];
     this.population_quality = 0;
@@ -76,19 +74,17 @@ export class GeneticEvolution {
   }
 
   generateRandomPopulation(size: number) {
-    //let coefs_ar: ICoefs[] = []
     for (let i = 0; i < size; i++) {
       let coefs: ICoefs = {
-        a: getRandomNumber(1, 10),
-        b: getRandomNumber(-10, 10),
-        c: getRandomNumber(-10, 10)
+        a: getRandomNumber(this.min, this.max),
+        b: getRandomNumber(this.min, this.max),
+        c: getRandomNumber(this.min, this.max)
       };
       this.population.push(coefs);
-      //coefs_ar.push(coefs);
     }
   }
 
-  initialize(size: number = 10) {
+  initialize(size: number = 100) {
     this.generateRandomPopulation(size);
   }
 
@@ -113,22 +109,26 @@ export class GeneticEvolution {
     let firts_parent_index = getRandomIntNumber(0, this.population.length - 1);
     let others = [...this.population];
     others.splice(firts_parent_index, 1);
-    //console.log(others, others.length);
     let second_parent_index = getRandomIntNumber(0, others.length - 1);
-    //console.log(firts_parent_index, second_parent_index);
     let first_parent = this.population[firts_parent_index];
     let second_parent = others[second_parent_index];
-    //console.log(first_parent, second_parent);
-    //let first_p: IParentProbability = this.parent_probabilities.find(x => Math.random() > x.probability);
-    //let others: IParentProbability[] = [...this.parent_probabilities];
-    //others.splice(others.indexOf(first_p), 1);
-    //let second_p: IParentProbability = this.parent_probabilities.find(x => Math.random() > x.probability);
-    //let prob = second_p.individual;
+    /*
+    let first_parent_probability: IParentProbability = undefined;
+    while (first_parent_probability === undefined) {
+      first_parent_probability = this.parent_probabilities.find(x => Math.random() < x.probability);
+    }
+    let others: IParentProbability[] = [...this.parent_probabilities];
+    others.splice(others.indexOf(first_parent_probability), 1);
+    let second_parent_probability: IParentProbability = undefined;
+    while (second_parent_probability === undefined) {
+      second_parent_probability = others.find(x => Math.random() < x.probability);
+    }
+    */
     return {first: first_parent, second: second_parent};
   }
 
   selectParents(): IParentsPair[] {
-    this.calculateParentProbability();
+    //this.calculateParentProbability();
     let parents_pairs: IParentsPair[] = []; 
     for (let i = 0; i < this.population.length / 2; i++)
     {
@@ -142,7 +142,7 @@ export class GeneticEvolution {
       let parents_pairs = this.selectParents();
       let new_individuals_pairs: [ICoefs, ICoefs][] = parents_pairs.map(this.crossover);
       let new_individuals: ICoefs[] = [].concat.apply([], new_individuals_pairs);
-      //new_individuals = new_individuals.map(this.mutate);
+      new_individuals = new_individuals.map(x => this.mutate(x, this.max, this.min, i, n, this.mutation_probability, this.irregularity_coef));
       this.population = [...this.population, ...new_individuals];
       this.killing()
     }
@@ -152,15 +152,9 @@ export class GeneticEvolution {
 
   crossover(parents_pair: IParentsPair): [ICoefs, ICoefs] {
     const {first, second} = parents_pair;
-    //let arr = new Float64Array(1);
-    //arr[0] = first.a;
-    //console.log(arr[0]);
-    //const buf = Buffer.from(arr.buffer);
-    //console.log(buf.readDoubleLE(0), first.a);
-    //console.log(buf);
-    const new_a_coefs = swapCoefs(first.a, second.a);
-    const new_b_coefs = swapCoefs(first.b, second.b);
-    const new_c_coefs = swapCoefs(first.c, second.c)
+    const new_a_coefs = createChilds(first.a, second.a);
+    const new_b_coefs = createChilds(first.b, second.b);
+    const new_c_coefs = createChilds(first.c, second.c)
     const first_child: ICoefs = {
       a: new_a_coefs[0],
       b: new_b_coefs[0],
@@ -171,22 +165,18 @@ export class GeneticEvolution {
       b: new_b_coefs[1],
       c: new_c_coefs[1]
     }
-    /*
-    const child: ICoefs = {
-      a: (first.a + second.a) / 2,
-      b: (first.b + second.b) / 2,
-      c: (first.c + second.c) / 2,
-    }
-    */
     return [first_child, second_child];
   }
 
-  mutate(individual: ICoefs): ICoefs {
-    if (Math.random() < 0.05) {
+  mutate(individual: ICoefs, max: number, min: number, current_era: number, 
+    number_epochs: number, mutation_probability: number, b: number): ICoefs {
+    if (Math.random() < mutation_probability) {
+      const xe = getRandomIntNumber(0, 1);
+      const r = getRandomNumber(0, 1)
       const mutated_individual: ICoefs = {
-        a: individual.a * 0.01,
-        b: individual.b * 0.01,
-        c: individual.c * 0.01
+        a: mutateUnevely(individual.a, max, min, current_era, number_epochs, getRandomNumber(0, 1), getRandomIntNumber(0, 1), b),
+        b: mutateUnevely(individual.b, max, min, current_era, number_epochs, getRandomNumber(0, 1), getRandomIntNumber(0, 1), b),
+        c: mutateUnevely(individual.c, max, min, current_era, number_epochs, getRandomNumber(0, 1), getRandomIntNumber(0, 1), b),
       }
       return mutated_individual;
     }
